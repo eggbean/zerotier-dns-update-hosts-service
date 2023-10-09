@@ -2,9 +2,9 @@
 #
 # Install ZeroTier Update Hosts Service Script
 #
-#       Installs a script and service which updates files with ZeroTier member
-#       IP addresses every hour, using the ZeroTier API. Works on any Linux or
-#       WSL distro that uses systemd, with or without SELinux.
+#       Installs a script and service that updates files with ZeroTier member
+#       IP addresses when they change, using the ZeroTier API. Works on any
+#       Linux or WSL distro that uses systemd, with or without SELinux.
 #
 # Can be used to:
 #
@@ -12,8 +12,7 @@
 #       container or not. It can also update any other DNS server that uses the
 #       standard BIND host file format.
 #
-#       * Updates the Linux localhost's host file, leaving out the local
-#       hostname.
+#       * Updates the local Linux host file, leaving out the local hostname.
 #
 #       * On Windows WSL it does the same, as well as updates the Windows
 #       hosts's host file, leaving out the Windows hostname. It also adds an
@@ -29,28 +28,29 @@
 #
 #       $ sudo ./install-zt-update-hosts-service.sh --uninstall
 
-# Variables
+# VARIABLES
+# (See https://bit.ly/zerotier-update-service-readme)
 apikey=''
 network=''
 domain=''
 
-# Update frequency
+# Polling for changes frequency
 timer_interval='10min'
 
 # Location for installed script
 script_path='/srv/zt-update-hosts'
 
-# Uncomment for Pi-Hole custom list or any other DNS server using BIND format
+# Uncomment for Pi-Hole custom list file or any other DNS server using BIND format
 # pihole_custom_list='/home/jason/docker-pihole/etc-pihole/custom.list'
 
 # For WSL
 wsl_distroname='ubuntu.wsl' # Mustn't be the same as WSL or Windows FQDN hostname
 windows_hostfile='/mnt/c/Windows/System32/drivers/etc/hosts'
 
-# Any of the variables above can be overridden in a ${script_path}.env file
-# (Make sure that it can only be read by root)
+# NOTE: Any of the variables above can be overridden in a ${script_path}.env
+# file (make sure that it can only be read by root)
 
-# End of variables ============================================================
+# END OF VARIABLES ============================================================
 
 # Check if root
 [[ $(id -u) -ne 0 ]] && { echo "This script must be run as root" >&2; exit 1; }
@@ -90,6 +90,10 @@ uninstall() {
 
 if [[ $1 == --uninstall ]]; then uninstall; fi
 
+# Source variables file if exists
+if [[ -e ${script_path}.env ]]; then
+  source "${script_path}.env"
+fi
 # Write service files =========================================================
 cat << EOF >/etc/systemd/system/zt-update-hosts.service
 [Unit]
@@ -126,7 +130,6 @@ cat << EOF >"$script_path"
 apikey="$apikey"
 network="$network"
 domain="$domain"
-script_path="$script_path"
 pihole_custom_list="$pihole_custom_list"
 linux_hostfile='/etc/hosts'
 wsl_distroname="$wsl_distroname"
@@ -185,16 +188,16 @@ for k in "${!hostentries[@]}"; do [[ " ${hostentries[k]} " == *' null '* ]] && u
 
 # Remove any existing ZeroTier host entries from Pi-Hole custom list
 if [[ $pihole_custom_list ]]; then
-  if grep -wq ZeroTier $pihole_custom_list; then
-    pihole_zthosts=$(awk 'BEGIN { p=1; prev_blank=0 } NF { p=1; prev_blank=0 } /^$/ { prev_blank=1 } /ZeroTier/ { if (prev_blank == 0) p=0 } p' < $pihole_custom_list)
-    printf "%s\n" "$pihole_zthosts" > $pihole_custom_list
+  if grep -wq ZeroTier "$pihole_custom_list"; then
+    pihole_zthosts=$(awk 'BEGIN { p=1; prev_blank=0 } NF { p=1; prev_blank=0 } /^$/ { prev_blank=1 } /ZeroTier/ { if (prev_blank == 0) p=0 } p' < "$pihole_custom_list")
+    printf "%s\n" "$pihole_zthosts" > "$pihole_custom_list"
   fi
 fi
 
 # Write ZeroTier entries to Pi-Hole custom list file
 if [[ $pihole_custom_list ]]; then
-  printf "\n%s\n" "# ZeroTier Network" >> $pihole_custom_list;
-  for e in "${hostentries[@]}"; do { printf "%s\n" "$e" | column -t >> $pihole_custom_list; }; done
+  printf "\n%s\n" "# ZeroTier Network" >> "$pihole_custom_list";
+  for e in "${dnsentries[@]}"; do { printf "%s\n" "$e" | column -t >> "$pihole_custom_list"; }; done
 fi
 
 # Remove any existing ZeroTier entries from Linux host file
@@ -218,7 +221,7 @@ if [[ $is_wsl ]] && [[ $wsl_distroname ]]; then
   fi
 fi
 
-# Write ZeroTier  entries to Windows host file
+# Write ZeroTier entries to Windows host file
 if [[ $is_wsl ]]; then
   printf "\r\n%s\r\n" "# ZeroTier Network" >> $windows_hostfile
   # Remove ZeroTier entry for Windows host hostname from array
